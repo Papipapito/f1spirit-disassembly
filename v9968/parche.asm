@@ -150,16 +150,20 @@ V9_INIT:
 	jp V9R_LEJOS
 
 ; --------------------------------------------------------------------------
-; V9_ANIDADA: desde V9R_ANIDADA (0x40B5) con la 15 en 0xA000, las
-; interrupciones cerradas y B = S#0, si esta interrupcion o la de fuera ha
-; pasado por el renderer. Devuelve en A la pagina para 0xA000.
+; V9_ANIDADA: desde V9R_ANIDADA (0x40B5, la salida de TODAS las
+; interrupciones con el renderer puesto), con la 15 en 0xA000, las
+; interrupciones cerradas y B = S#0. Devuelve en A la pagina para 0xA000.
 ; - Con el candado del bit 1 de E1C5 puesto, es una interrupcion que ha
-;   entrado mientras la de fuera repintaba (0x4020): la de fuera esta entre
-;   0x4049 y 0x4060, con D/E/F puestas salvo la 16 en 0x6000 si esta en el
-;   renderer. Se hace su sonido, su cola y su cuenta atras, y se apunta.
-; - Sin el, es la salida de la interrupcion que ha repintado (o de una que
-;   ha entrado en su logica): se baja la marca y, si este RDVDP se ha comido
-;   un VBLANK que llego con las interrupciones cerradas, se hace su parte.
+;   entrado mientras la de fuera estaba en su parte de sonido o repintando
+;   (0x4020): la de fuera esta entre 0x4029 y 0x4067, con D/E/F puestas
+;   (salvo la 16 en 0x6000 si esta en el renderer). Se cuenta en el reloj y
+;   se apunta su sonido. Si la de fuera estaba repintando (V9_EN_VENTANA),
+;   el sonido se hace ya; si no, puede que el reproductor este a medias (el
+;   `ei` de WRTPSG abre las interrupciones en mitad de el), asi que espera.
+; - Sin el candado, es la salida de una interrupcion de fuera: si este
+;   RDVDP se ha comido un VBLANK que llego con las interrupciones cerradas,
+;   se apunta; y se hace el sonido de todas las apuntadas, con el candado
+;   puesto (asi la que entre mientras solo se apunta).
 ; El reloj del juego (F0FC): la de fuera todavia no ha mirado si toca paso
 ; de logica (0x409E), y al darlo PONE F0FC A CERO. Una de dentro cuenta en
 ; el acto si la de fuera no llega a 3 con la suya (el paso que le tocaba a
@@ -171,12 +175,21 @@ V9_ANIDADA:
 	ld a,(E_CANDADOS)
 	and 002h
 	jr nz,V9_ANID_DENTRO
-	ld (V9_EN_VENTANA),a	; A = 0
-	bit 7,b
-	jr z,V9_ANID_RELOJ
-	ld hl,V9_TICS
+	bit 7,b			; este RDVDP se ha comido un VBLANK?
+	jr z,V9_ANID_FUERA
+	ld hl,V9_TICS		; su cuenta, detras del cero...
 	inc (hl)
-	call V9_TIC
+	ld hl,V9_PEND		; ...y su sonido
+	inc (hl)
+V9_ANID_FUERA:
+	ld a,(V9_PEND)
+	or a
+	jr z,V9_ANID_RELOJ
+	ld hl,E_CANDADOS
+	set 1,(hl)
+	call V9_TICS_PENDIENTES
+	ld hl,E_CANDADOS
+	res 1,(hl)
 V9_ANID_RELOJ:
 	ld hl,V9_TICS
 	ld a,(hl)
@@ -193,13 +206,36 @@ V9_ANID_DENTRO:
 	cp 003h
 	jr nc,V9_ANID_APARTA
 	ld (hl),a		; no llega a paso: esta cuenta ya, y el paso sale
-	jr V9_ANID_TIC		; al acabar el repintado, sin perder nada
+	jr V9_ANID_SONIDO	; al acabar el repintado, sin perder nada
 V9_ANID_APARTA:
 	ld hl,V9_TICS		; ya da paso sin esta: para despues del cero
 	inc (hl)
-V9_ANID_TIC:
-	call V9_TIC
+V9_ANID_SONIDO:
+	ld hl,V9_PEND
+	inc (hl)
+	ld a,(V9_EN_VENTANA)	; repintando: su sonido, ya (si no hay otro en
+	or a			; marcha, que la hara el)
+	jr z,V9_ANID_FIN
+	ld a,(V9_EN_TIC)
+	or a
+	call z,V9_TICS_PENDIENTES
+V9_ANID_FIN:
 	ld a,00Fh
+	ret
+
+; el sonido de las interrupciones apuntadas en V9_PEND, una a una; las que
+; entren mientras (WRTPSG abre las interrupciones) se suman a la cuenta
+V9_TICS_PENDIENTES:
+	ld a,1
+	ld (V9_EN_TIC),a
+V9_TP_BUCLE:
+	call V9_TIC
+	di
+	ld hl,V9_PEND
+	dec (hl)
+	jr nz,V9_TP_BUCLE
+	xor a
+	ld (V9_EN_TIC),a
 	ret
 
 ; Lo que hace la interrupcion por cada fotograma (0x4029-0x4067) salvo el
@@ -428,7 +464,6 @@ V9_ANTES:
 	and 020h
 	ret nz
 	ld a,2
-	ld (V9_EN_VENTANA),a
 	ld (V9_ANTICIPO),a	; (2: sale gruesa, si no llega a 1)
 	ld bc,256 * 040h + 080h + 25	; R#25: CMD = 1
 	call V9_REG
@@ -481,12 +516,12 @@ V9_LEE_VRAM:
 ; queda esperando tanto como para perderse. La interrupcion que entra aqui
 ; dentro sale enseguida por el candado del bit 1 de E1C5, y en esa salida
 ; (0x40B5, V9R_ANIDADA) se le hace su parte de sonido y de reloj (F0FC): la
-; marca V9_EN_VENTANA lo permite hasta el final de esta interrupcion.
+; RAM marca con V9_EN_VENTANA que se esta repintando (V9R_SONIDO).
 V9_VENTANA_1J:
-	ld a,(E_CANDADOS)	; desde la interrupcion (0x405A), con el candado
+	ld a,(E_CANDADOS)	; desde la interrupcion (0x4046), con el candado
 	and 002h
 	jr z,V9_V1J_GRUESA	; desde 0x4BE9 (la logica): lo de siempre, que
-	ld (V9_EN_VENTANA),a	; justo despues se vuelven a cargar los tiles
+				; justo despues se vuelven a cargar los tiles
 	ld hl,V9_ANTICIPO	; lo ha empezado V9_ANTES?
 	ld a,(hl)
 	ld (hl),0
@@ -507,6 +542,8 @@ V9_VENTANA_1J:
 V9_V1J_RESTO:			; V9_CELDAS_FONDO, despues del sonido: 0x405A)
 	call V9_TIRAS_RESTO
 	call V9_NOMBRES_FINOS
+	ld a,2			; en fino: en 0x405A, lo de fondo
+	ld (V9_HECHO),a
 	ld ix,0E2C0h		; como los deja la ventana original
 	ld iy,0E2C0h
 	ret

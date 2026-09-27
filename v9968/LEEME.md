@@ -29,8 +29,23 @@ V9968 en lugar del V9958 (copiala a `share/machines/`):
 En cualquier otra maquina la ROM parcheada funciona como la original:
 comprobado en MSX1, MSX2 (V9938) y MSX2+ (V9958) con la demo, paso a paso
 (camara, coche del jugador y estado del juego iguales) y al mismo ritmo: los
-ganchos cuestan algun ciclo y algun paso sale un fotograma antes o despues
-(como mucho tres en algun momento), pero la carrera acaba a la vez.
+ganchos cuestan algun ciclo y algun paso sale uno o unos pocos fotogramas
+antes o despues, pero la carrera acaba a la vez.
+
+**Vista previa sin el V9968.** Para ver el scroll en cualquier emulador de
+MSX2+ (openMSX de siempre, por ejemplo):
+
+    make v9968-v9958   # -> f1spirit_v9968_v9958.rom
+    openmsx -machine C-BIOS_MSX2+ -cart f1spirit_v9968_v9958.rom -romtype KonamiSCC
+
+Con un V9958 el modo fino funciona, pero la carrera va a unos 12 pasos por
+segundo en vez de 20: sirve para verlo, no para jugar.
+
+**En un MSX de verdad con el cartucho V9968.** El cartucho tiene un
+conmutador de puertos: 88h (el normal) o 98h. Este parche solo usa el V9968
+en 98h, y su manual avisa de que 98h **solo** se puede poner si el VDP del
+propio MSX esta desactivado: con los dos en 98h el MSX se puede estropear.
+Con el cartucho en 88h, la ROM funciona como la original con el VDP del MSX.
 
 ## Que se ve
 
@@ -95,9 +110,12 @@ el renderer bastante mas. Para que el ritmo sea el mismo:
 - Lo que no se ve (filas ocultas, columna de margen) va despues del sonido
   (0x405A).
 - Una interrupcion que llega mientras se repinta no se pierde: el juego la
-  despacharia sin sonido y sin contarla; en su salida (0x40B5) se hace su
-  paso de sonido y se cuenta en el reloj (`V9_ANIDADA`), con cuidado de que
-  el `F0FC = 0` de cada paso no se la coma.
+  despacharia sin sonido y sin contarla; en su salida (0x40B5) se cuenta en
+  el reloj, con cuidado de que el `F0FC = 0` de cada paso no se la coma, y
+  se hace su paso de sonido (`V9_ANIDADA`). Si ha cortado al reproductor de
+  sonido a medias (que llama a WRTPSG, y esta rutina de la BIOS abre las
+  interrupciones), su sonido se aplaza a la salida de la interrupcion de
+  fuera: el reproductor nunca se ejecuta dos veces a la vez.
 
 **Deteccion.** Al arrancar se mira la version de MSX (2 o mas), el ID del VDP
 (S#1) y, con R#21 V58 = 0, si es un V9968 (ID 3). Solo entonces se pone el
@@ -138,7 +156,9 @@ Todo en el emulador (el fork de openMSX), con la demo del juego:
   ver abajo).
 - **Ritmo**: 20 pasos por segundo, como el original, con algun segundo de 18
   o 19 en las curvas mas cerradas. En la carrera de la demo (unos 30 s) llega
-  a la meta unos 0,25 s despues que el original.
+  a la meta unos 0,35 s despues que el original.
+- **Estabilidad**: 200 s de demo seguidos sin cuelgues, con la pila en su
+  sitio (nunca por debajo de 0xF086). La vista previa con V9958, 140 s.
 
 ## Limitaciones
 

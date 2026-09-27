@@ -154,6 +154,11 @@ externos: trace
 v9968: $(ROM)
 	@python3 tools/parchea_v9968.py $(ROM) f1spirit_v9968.rom
 
+# La misma con el modo fino tambien en un V9958, para verla en cualquier
+# emulador de MSX2+ (ahi la carrera va a unos 12 pasos por segundo).
+v9968-v9958: $(ROM)
+	@python3 tools/parchea_v9968.py --v9958 $(ROM) f1spirit_v9968_v9958.rom
+
 test:
 	@echo "=================================================================="
 	@echo " Tests"
@@ -164,4 +169,4 @@ clean:
 	rm -f $(WORK)/p*.trace.json $(WORK)/p*.blocks $(WORK)/p*.out.bin \
 	      $(WORK)/f1spirit_reensamblada.rom $(WORK)/pasmo.err
 
-.PHONY: all comprueba reconoce paginas trace listado verify sanity externos v9968 test clean
+.PHONY: all comprueba reconoce paginas trace listado verify sanity externos v9968 v9968-v9958 test clean

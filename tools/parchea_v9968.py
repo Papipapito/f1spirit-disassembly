@@ -19,8 +19,11 @@ paginas del juego NINGUN byte ha cambiado fuera de las zonas declaradas en
 ZONAS: si el parche se sale, sale con 1.
 
 Uso:
-    parchea_v9968.py [rom_original] [salida]
+    parchea_v9968.py [--v9958] [rom_original] [salida]
         por defecto f1spirit.rom y f1spirit_v9968.rom
+    --v9958  modo fino tambien con un V9958 (V9958_FINO = 1): para ver el
+             scroll en cualquier emulador de MSX2+, aunque ahi la carrera va
+             a unos 12 pasos por segundo en vez de 20
 Hace falta pasmo en el PATH.
 """
 import hashlib
@@ -66,8 +69,15 @@ ZONAS = [
 ORG = {0: 0x4000, 15: 0xA000, PAGINA_V9: 0x6000}
 
 
+# --equ que se pasan a pasmo (opciones de v9968/comun.asm)
+EQUS = []
+
+
 def pasmo(fuente, binario, simbolos=None):
-    orden = ["pasmo", "--bin", fuente, binario]
+    orden = ["pasmo"]
+    for e in EQUS:
+        orden += ["--equ", e]
+    orden += ["--bin", fuente, binario]
     if simbolos:
         orden.append(simbolos)
     r = subprocess.run(orden, cwd=RAIZ, capture_output=True, text=True)
@@ -176,8 +186,14 @@ def construye(rom_original, salida):
 
 
 def main(argv):
-    rom = argv[1] if len(argv) > 1 else "f1spirit.rom"
-    salida = argv[2] if len(argv) > 2 else "f1spirit_v9968.rom"
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    for opcion in (a for a in argv[1:] if a.startswith("--")):
+        if opcion == "--v9958":
+            EQUS.append("V9958_FINO=1")
+        else:
+            sys.exit("opcion desconocida: %s" % opcion)
+    rom = args[0] if len(args) > 0 else "f1spirit.rom"
+    salida = args[1] if len(args) > 1 else "f1spirit_v9968.rom"
     construye(rom, salida)
 
 

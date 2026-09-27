@@ -148,14 +148,16 @@ V9_NUEVAS		equ 0F2D5h	; 1 si en este repintado se ha rellenado algo visible
 V9_S			equ 0F2D6h	; la fila del mapa que se rellena
 V9_PASADA		equ 0F2D7h	; 0: filas que se ven, 1: ocultas
 V9_FALTAN		equ 0F2D8h	; las filas no llenas del byte que se recorre
-V9_EN_VENTANA		equ 0F2D9h	; <> 0: esta interrupcion ha entrado en el renderer
+V9_EN_VENTANA		equ 0F2D9h	; <> 0: se esta repintando (ahi el sonido no esta a medias)
 V9_TICS			equ 0F2DAh	; interrupciones recuperadas que aun no estan en F0FC
 V9_OBJ			equ 0F2DBh	; 0x80 + fila del mapa de un objeto sin sus patrones
-V9_HECHO		equ 0F2DCh	; 1: el repintado ya se ha hecho antes del sonido
+V9_HECHO		equ 0F2DCh	; 1: repintado antes del sonido; 2: y en fino (falta el fondo)
 V9_REGS_CELDA		equ 0F2DDh	; 1: los registros fijos de celda ya estan en el VDP
 V9_TIR_PEND		equ 0F2DEh	; 1: faltan las tiras de los tercios 1 y 2
 V9_TIR_HASTA		equ 0F2DFh	; el tercio en el que para V9_TIR_TERCIOS
 V9_ANTICIPO		equ 0F2E0h	; 1: V9_ANTES ya ha hecho lo suyo (2: y sale gruesa)
+V9_PEND			equ 0F2E1h	; interrupciones recuperadas que aun no han sonado
+V9_EN_TIC		equ 0F2E2h	; 1: V9_TICS_PENDIENTES en marcha (no se reentra)
 V9_BLK			equ 0F2C0h	; (15) registros R#32..R#46 para `otir`
 V9_VALIDAS		equ 0F300h	; (128) 32 filas x 32 bits: celdas del mapa al dia
 
@@ -168,5 +170,9 @@ V9968_S16		equ 1
 
 ; Opcion: modo fino tambien con un V9958 (MSX2+, turboR). Funciona, pero sin
 ; los comandos rapidos del V9968 la carrera va a unos 12 pasos por segundo en
-; vez de 20. Con 0, un V9958 se queda con el scroll de siempre.
+; vez de 20. Con 0, un V9958 se queda con el scroll de siempre. Se puede dar
+; desde fuera (`tools/parchea_v9968.py --v9958`, que pasa --equ a pasmo).
+	if defined V9958_FINO
+	else
 V9958_FINO		equ 0
+	endif

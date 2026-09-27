@@ -91,11 +91,14 @@ V9R_SONIDO:
 	jp z,SONIDO_PASO
 	ld a,(E_CANDADOS)
 	rrca
-	call nc,V9R_REPINTA_YA
-	jp SONIDO_PASO
-V9R_REPINTA_YA:
+	jp c,SONIDO_PASO	; logica en curso: sin repintado (0x4056)
 	ld a,1
 	ld (V9_HECHO),a
+	ld (V9_EN_VENTANA),a	; repintando, una interrupcion que entre puede
+	call V9R_REPINTA	; hacer su sonido en el acto (V9_ANIDADA)...
+	xor a
+	ld (V9_EN_VENTANA),a	; ...y con el reproductor en marcha, no
+	jp SONIDO_PASO
 
 ; el repintado de siempre, con el vigilante (pagina 16) si el modo fino esta
 ; puesto
@@ -107,22 +110,24 @@ V9R_REPINTA:
 	jp REPINTA_PENDIENTE
 
 ; 0x405A, en lugar de `call nc,REPINTA_PENDIENTE`: si el repintado ya se ha
-; hecho antes del sonido, lo que el renderer deja para despues (columna de
-; margen y filas ocultas); si no, el repintado, aqui como siempre
+; hecho antes del sonido y ha salido fino, lo que el renderer deja para
+; despues (columna de margen y filas ocultas); sin VDP de los buenos, el
+; repintado, aqui como siempre
 V9R_REPINTA_405A:
 	ld hl,V9_HECHO
 	ld a,(hl)
 	or a
 	jr z,V9R_REPINTA
 	ld (hl),0
-	ld a,(V9_EN_VENTANA)	; ha pasado por el renderer...
-	or a
+	dec a
 	ret z
-	ld a,(V9_FINO)		; ...y esta en fino
-	or a
-	ret z
+	ld a,1
+	ld (V9_EN_VENTANA),a
 	ld hl,P16_FONDO
-	jp V9R_LEJOS
+	call V9R_LEJOS
+	xor a
+	ld (V9_EN_VENTANA),a
+	ret
 
 ; --------------------------------------------------------------------------
 ; 0x40B5, la salida de la interrupcion, en lugar de `call RDVDP`. El juego
@@ -130,13 +135,13 @@ V9R_REPINTA_405A:
 ; candado del bit 1 de E1C5 esta puesto, o si su VBLANK cae con las
 ; interrupciones cerradas y se lo come este RDVDP. Con un repintado corto
 ; no pasa nunca; con el renderer, que puede tardar casi un fotograma, si.
-; Si esta interrupcion (o la de fuera) ha pasado por el renderer, la pagina
-; 15 recupera esa interrupcion (V9_ANIDADA). B = S#0 para ella.
+; Con el renderer puesto, la pagina 15 recupera esas interrupciones
+; (V9_ANIDADA). B = S#0 para ella.
 ; --------------------------------------------------------------------------
 V9R_ANIDADA:
-	ld a,(V9_EN_VENTANA)
+	ld a,(V9_CAPS)
 	or a
-	jp z,RDVDP		; lo de siempre, casi gratis: pasa en cada interrupcion
+	jp z,RDVDP		; sin el renderer, lo de siempre
 	call RDVDP
 	push af
 	ld b,a
@@ -152,7 +157,7 @@ V9R_VENTANA:
 	ld a,(V9_CAPS)
 	or a
 	ld hl,P16_VENTANA_1J
-	jr nz,V9R_LEJOS
+	jp nz,V9R_LEJOS
 	ld ix,0E2C0h		; sin VDP que valga, lo de siempre
 	jp VENTANA_1J_SIGUE
 
