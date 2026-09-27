@@ -40,6 +40,12 @@ de pagina (openMSX detecta solo el mapper; 90 s de demo resolvieron 52):
 
 `make verify` tiene que acabar en `OK: la ROM entera reproducible byte a byte`.
 
+## Scroll suave con el V9968
+
+`make v9968` monta `f1spirit_v9968.rom`: el juego con el fondo de la pista
+moviendose pixel a pixel en una maquina con el VDP V9968, y como siempre en
+las demas. Todo lo que hay que saber esta en [v9968/LEEME.md](v9968/LEEME.md).
+
 ## Estado
 
 | | |

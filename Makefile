@@ -149,6 +149,11 @@ externos: trace
 	@python3 tools/externos.py $(WORK) $(SRC)
 	@python3 tools/siembra_medidas.py $(WORK) $(SRC) --solo-lista
 
+# F-1 Spirit con scroll suave para el V9968 (ver v9968/LEEME.md): la ROM
+# parcheada, de 256 KB, en f1spirit_v9968.rom. Hace falta pasmo.
+v9968: $(ROM)
+	@python3 tools/parchea_v9968.py $(ROM) f1spirit_v9968.rom
+
 test:
 	@echo "=================================================================="
 	@echo " Tests"
@@ -159,4 +164,4 @@ clean:
 	rm -f $(WORK)/p*.trace.json $(WORK)/p*.blocks $(WORK)/p*.out.bin \
 	      $(WORK)/f1spirit_reensamblada.rom $(WORK)/pasmo.err
 
-.PHONY: all comprueba reconoce paginas trace listado verify sanity externos test clean
+.PHONY: all comprueba reconoce paginas trace listado verify sanity externos v9968 test clean
