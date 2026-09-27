@@ -64,6 +64,8 @@ ZONAS = [
     (0, 0x4CD1, 0x4CD4),    # push hl / pop ix (CARGA_LISTA_TILES_MODO)
     (0, 0x56D4, 0x56D7),    # jp MAPEA_1_2_3
     (0, 0x4701, 0x4705),    # ld (ix-003h),000h (TILES_OBJETO_PISTA)
+    (0, 0x4784, 0x4787),    # ld a,(0E1C3h) (SPRITES_A_VRAM)
+    (0, 0x564C, 0x564F),    # call MAPEA_7_8_9 (PINTA_FILA_PISTA)
     (15, P15_HUECO[0], P15_HUECO[1]),
 ]
 ORG = {0: 0x4000, 15: 0xA000, PAGINA_V9: 0x6000}

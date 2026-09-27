@@ -53,6 +53,16 @@ Con el cartucho en 88h, la ROM funciona como la original con el VDP del MSX.
   horizontal sigue siendo por columnas, como en el original.
 - **16 sprites por linea** (bit S16 del V9968): menos parpadeo cuando se
   juntan coches. Se quita con `V9968_S16 equ 0` en `comun.asm`.
+- **Sprites siempre en el mismo orden.** El juego los manda a la VRAM al
+  derecho y al reves en pasos alternos para repartir el limite de 4 por linea
+  del MSX1; con S16 no hace falta (en la carrera de la demo no pasan de 6 por
+  linea), y dos coches que se tocan ya no se turnan cual va encima 20 veces
+  por segundo. El del jugador (sprites 0 y 1) va siempre encima.
+- **Los colores del MSX1.** El juego es de MSX1 y no toca la paleta: en un
+  MSX2+ sale con la de la BIOS, de 3 bits por canal, con los verdes, azules y
+  rojos cambiados. Con el V9968 se cargan los 16 colores del TMS9918 (la
+  paleta de MAME, sacada de los voltajes de la hoja de datos de TI) con 5
+  bits por canal. Se quita con `V9968_PALETA equ 0`.
 - La imagen se actualiza sin cortes: las tiras de cada tercio estan en la
   VRAM antes de que el haz llegue a el (el de arriba, en mas del 90 % de los
   repintados; los otros dos, casi siempre).
@@ -86,6 +96,20 @@ la que entra ya esta; solo falta la nueva de margen). Lo que el juego repinta
 en una fila que aun se ve (la de abajo del todo) se aplaza hasta que deja de
 verse.
 
+- **Solo lo que cambia.** El juego pinta la fila nueva en el hueco del buffer
+  de la de abajo del todo, y de sus 17 columnas (las 15 que se ven y las de
+  margen) suelen cambiar entre 4 y 8 tiles, y muchas veces ninguno: el resto
+  es asfalto o hierba igual que antes. Al principio de `PINTA_FILA_PISTA`
+  (0x564C) se hace una foto de la fila, y al final (`V9_FILA_CAMBIOS`) se
+  apunta que columnas han cambiado en uno de dos huecos; cuando la fila deja
+  de verse, solo esas se rehacen. Sin foto o sin hueco, la fila entera, como
+  antes. En la segunda carrera de la demo son un 30 % menos de celdas.
+- **La columna de margen, a trozos.** Rellenarla entera eran hasta 32 celdas,
+  unos 20 ms de golpe al cruzar una columna, y el paso siguiente llegaba
+  tarde. Ahora son 12 por repintado como mucho (`N_MARGEN`), dentro de las 20
+  de fondo (`N_ADELANTO`). Si la ventana sigue hacia ese lado antes de
+  acabarla, lo que falta se acaba en el acto, columna abajo.
+
 **VRAM.**
 
 | | |
@@ -108,7 +132,7 @@ el renderer bastante mas. Para que el ritmo sea el mismo:
   tercio de arriba incluso antes que los sprites (`V9_ANTES`). El sonido se
   retrasa unos milisegundos en esas interrupciones.
 - Lo que no se ve (filas ocultas, columna de margen) va despues del sonido
-  (0x405A).
+  (0x405A), 20 celdas como mucho por repintado.
 - Una interrupcion que llega mientras se repinta no se pierde: el juego la
   despacharia sin sonido y sin contarla; en su salida (0x40B5) se cuenta en
   el reloj, con cuidado de que el `F0FC = 0` de cada paso no se la coma, y
@@ -146,7 +170,7 @@ deja como estaba y el juego va con el scroll de siempre.
 | `tools/parchea_v9968.py` | monta la ROM y comprueba que nada cambia fuera de las zonas declaradas |
 | `tests/test_v9968.py` | cada direccion de `comun.asm` contra el listado, y la ROM montada |
 
-La ROM: la pagina 0 lleva 16 ganchos de 3 a 5 bytes (cada uno tapa una
+La ROM: la pagina 0 lleva 18 ganchos de 3 a 5 bytes (cada uno tapa una
 instruccion que se rehace fuera); el hueco a 0xFF de la pagina 15
 (0xBC84-0xBF4F) lleva el arranque, la recuperacion de interrupciones y la
 imagen de la RAM; la pagina 16 (nueva, se mapea en 0x6000 solo mientras se
@@ -163,20 +187,26 @@ Todo en el emulador (el fork de openMSX), con la demo del juego:
   de sonido cae en otro momento). El marcador y la tabla de sprites en la
   VRAM, identicos tambien.
 - **Imagen**: la ventana que muestra el VDP, pixel a pixel, contra la que
-  sale del buffer E400 y la camara: 267.542 lineas de tile bien y ninguna
-  mal en dos carreras de la demo (un 1,5 % tiene la variante de otro tercio,
-  ver abajo).
-- **Ritmo**: 20 pasos por segundo, como el original, con algun segundo de 18
-  o 19 en las curvas mas cerradas. En la carrera de la demo (unos 30 s) llega
-  a la meta unos 0,35 s despues que el original.
-- **Estabilidad**: 200 s de demo seguidos sin cuelgues, con la pila en su
-  sitio (nunca por debajo de 0xF086). La vista previa con V9958, 140 s.
+  sale del buffer E400 y la camara, en las dos carreras de la demo: 114.658
+  lineas de tile bien en la primera y 268.063 en la segunda, y ninguna mal
+  (un 1,3 % y un 1,6 % tienen la variante de otro tercio, ver abajo). Igual
+  con HMMM que con LMMM.
+- **Ritmo** (los pasos de carrera, contra el original en la misma maquina):
+  en la primera carrera, 556 pasos entre los segundos 45 y 72 frente a 557.
+  En la segunda, con el Z80 a 3,58 MHz, 1.202 frente a 1.307 (un 92 %): ver
+  Limitaciones. Con el Z80 a 5,37 MHz (el turbo del MSXimus), 3.003 pasos en
+  200 s frente a 3.004: el mismo ritmo.
+- **Estabilidad**: 200 s de demo seguidos (las dos carreras) sin cuelgues,
+  con la pila en su sitio (nunca por debajo de 0xF086), con HMMM y con LMMM.
+- **Sprites y paleta**: la tabla de sprites en la VRAM, siempre al derecho con
+  S16 (el original alterna); los colores, los del TMS9918 (captura del fork).
 - **Autotest**: con el fork tal cual elige HMMM; con el fallo de HRA emulado
-  (`OPENMSX_HRA_G2_QUIRK=1`), LMMM, y la carrera sale igual: 111.765 lineas
-  de tile bien y ninguna mal, y la logica identica paso a paso (1.483 pasos).
-  Con un V9958 (vista previa) elige HMMM; en un MSX2 no llega a probar nada.
-  Si no copia bien ningun comando (forzado desde el depurador), el VDP vuelve
-  a como estaba (R#20, R#25 y R#14 a 0) y la demo va con el scroll de siempre.
+  (`OPENMSX_HRA_G2_QUIRK=1`), LMMM. Con un V9958 (vista previa) elige HMMM, y
+  ni S16 ni paleta; en un MSX2 no llega a probar nada. Si no copia bien
+  ningun comando (forzado desde el depurador), el VDP vuelve a como estaba
+  (R#20, R#25 y R#14 a 0) y la demo va con el scroll de siempre.
+- **Sin V9968**: en MSX1, MSX2 y MSX2+ (openMSX de siempre), 903 pasos
+  iguales que con la ROM original.
 
 ## Limitaciones
 
@@ -194,6 +224,13 @@ Todo en el emulador (el fork de openMSX), con la demo del juego:
 - **Sonido**: en las interrupciones en las que se repinta (una de cada
   tres), el paso del reproductor llega hasta unos 7 ms mas tarde. No se ha
   comprobado de oido.
+- **Ritmo a 3,58 MHz en los tramos pesados.** En la segunda carrera de la demo
+  el coche va mas rapido (entra casi una fila nueva por paso) y la logica del
+  juego tarda mas: logica, sonido y renderer (unos 15 ms por paso) no caben
+  en los tres fotogramas de un paso y algunos pasos salen un fotograma tarde,
+  unos 18 pasos por segundo en vez de 20. La logica es la misma (paso a paso),
+  solo va mas despacio. Con el Z80 a 5,37 MHz sobra tiempo y va como el
+  original. El renderer ya casi no espera al VDP: todo es tiempo del Z80.
 - **Probado en emulacion y en simulacion del RTL.** El fork emula un V9968
   que copia bien con HMMM; con la variable `OPENMSX_HRA_G2_QUIRK` (un parche
   de pruebas al fork) salta bytes como el RTL de HRA!, y el autotest elige

@@ -44,6 +44,8 @@ GANCHOS = {
     "G_VENTANA_2J": (0x4538, ["ld a,(00007h)"]),
     "G_BORRA_SPRITES": (0x465B, ["ld a,0e0h", "ld hl,0ea80h"]),
     "G_OBJETO": (0x4701, ["ld (ix-003h),000h"]),
+    "G_SPRITES": (0x4784, ["ld a,(0e1c3h)"]),
+    "G_FILA_PISTA_INI": (0x564C, ["call MAPEA_7_8_9"]),
     "G_CASILLA_HUD": (0x491B, ["ld hl,03965h"]),
     "G_CORTINILLA": (0x49C7, ["ld hl,0e1c4h"]),
     "G_LISTA_TILES": (0x4CD1, ["push hl", "pop ix"]),
@@ -55,6 +57,7 @@ GANCHOS = {
 RUTINAS = [
     ("REPINTA_PENDIENTE", 0x40BB, 0, "REPINTA_PENDIENTE"),
     ("MAPEA_1_2_3", 0x43FE, 0, "MAPEA_1_2_3"),
+    ("MAPEA_7_8_9", 0x4438, 0, "MAPEA_7_8_9"),
     ("VENTANA_1J_SIGUE", 0x4517, 0, None),
     ("G_VENTANA_J2_SIGUE", 0x44E3, 0, None),
     ("G_VUELCA_768_SIGUE", 0x44C8, 0, None),
@@ -73,7 +76,7 @@ LARGO_ZONA = {
     "G_INIT": 3, "G_VUELCA_768": 4, "G_VENTANA_J2": 4, "G_BORRA_VENTANA": 5,
     "G_VENTANA_1J": 4, "G_VENTANA_2J": 3, "G_BORRA_SPRITES": 5, "G_OBJETO": 4,
     "G_CASILLA_HUD": 3, "G_CORTINILLA": 3, "G_LISTA_TILES": 3,
-    "G_FILA_PISTA_FIN": 3,
+    "G_FILA_PISTA_FIN": 3, "G_SPRITES": 3, "G_FILA_PISTA_INI": 3,
 }
 
 
@@ -165,6 +168,22 @@ class TestV9968Direcciones(unittest.TestCase):
         self.assertLessEqual(self.sim["V9_VALIDAS"] + 128, 0xF380)
         self.assertEqual(parche.RAM_FIN, self.sim["V9_CAPS"],
                          "el codigo de la RAM acaba donde empiezan las variables")
+        # V9_FILA_CAMBIOS recorre la foto con `inc e`: no puede cruzar pagina
+        self.assertLessEqual((self.sim["V9_VIEJA"] & 0xFF) + 32, 0x100)
+
+    def test_las_variables_no_se_pisan(self):
+        # cada variable ocupa lo que dice su comentario, "(N)", o 1 byte
+        ocupa = []
+        with open(os.path.join(RAIZ, "v9968", "comun.asm"), encoding="utf-8") as f:
+            for ln in f:
+                m = re.match(r"^(V9_\w+)\s+equ\s+([0-9A-Fa-f]+)h\b\s*(?:;\s*(?:\((\d+)\))?)?", ln)
+                if m and int(m.group(2), 16) >= parche.RAM_FIN:
+                    ocupa.append((int(m.group(2), 16), int(m.group(3) or 1), m.group(1)))
+        ocupa.sort()
+        for (a, n, nombre), (b, _, sig) in zip(ocupa, ocupa[1:]):
+            self.assertLessEqual(a + n, b, "%s (0x%04X, %d) pisa %s (0x%04X)" % (nombre, a, n, sig, b))
+        a, n, nombre = ocupa[-1]
+        self.assertLessEqual(a + n, 0xF380, nombre)
 
 
 @unittest.skipUnless(os.path.exists(ROM), "falta f1spirit.rom")

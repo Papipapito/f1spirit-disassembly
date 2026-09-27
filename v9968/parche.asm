@@ -20,9 +20,11 @@
 ; scroll fino es copiar con HMMM desde la linea que diga la camara: 18
 ; comandos por repintado (3 tercios x 3 grupos de 5 columnas x patron y
 ; color). El mapa se rellena tile a tile (dos HMMM de 8 x 1 por celda) solo
-; cuando el juego pinta filas nuevas. Donde HMMM salta bytes en G2 (el V9968
-; de HRA!), las copias van con LMMM: lo decide al arrancar V9_AUTOTEST, y el
-; comando queda en V9_COPIA.
+; cuando el juego pinta filas nuevas, y de esas, solo las celdas cuyo tile
+; cambia (V9_FILA_INI y V9_FILA_CAMBIOS). Donde HMMM salta bytes en G2 (el
+; V9968 de HRA!), las copias van con LMMM: lo decide al arrancar V9_AUTOTEST,
+; y el comando queda en V9_COPIA. Con el V9968, ademas, los sprites en orden
+; fijo (S16) y los colores del TMS9918 (V9_PALETA).
 ;
 ; Las tablas del juego (0x0000 y 0x2000) no se tocan nunca: son el atlas del
 ; que se copian los tiles. En modo fino el VDP pinta con tablas propias en
@@ -112,6 +114,12 @@
 	call V9R_H_OBJETO
 	nop
 
+	org G_SPRITES		; ld a,(0E1C3h)
+	call V9R_H_SPRITES
+
+	org G_FILA_PISTA_INI	; call MAPEA_7_8_9
+	call V9R_H_FILA_INI
+
 ; ==========================================================================
 ; PAGINA 15 (0xA000): en su hueco de 716 bytes a 0xFF (0xBC84-0xBF4F), lo
 ; que se llama con la 15 en 0xA000: el arranque (V9_ARRANQUE y V9_INIT), la
@@ -140,6 +148,9 @@ V9_ARRANQUE:
 	ld a,0FFh
 	ld (V9_COL0),a		; ninguna columna calculada todavia
 	ld (V9_COL_NUEVA),a	; ni columna de margen que rellenar
+	ld (V9_VIEJA_FILA),a	; ni foto de ninguna fila
+	ld (V9_HUECOS),a	; ni celdas que se salven en ninguna
+	ld (V9_HUECOS+5),a
 	jp (ix)
 
 ; V9_INIT: en lugar del `call 0BF50h` de INIT (0x4138): que VDP hay (en la
@@ -286,6 +297,7 @@ V9_FIN_P15:
 	jp V9_FILA		; P16_FILA
 	jp V9_OBJETO		; P16_OBJETO
 	jp V9_CELDAS_FONDO	; P16_FONDO
+	jp V9_FILA_INI		; P16_FILA_INI
 
 ; --------------------------------------------------------------------------
 ; V9_FILA: al final de PINTA_FILA_PISTA (por V9R_H_FILA), IX = el coche del
@@ -327,8 +339,7 @@ V9_FILA_PIEZA:
 	ld a,(ix+045h)
 V9_FILA_FPIEZA:
 	ld (hl),a
-	ld a,c
-	call V9_MARCA_SUCIA
+	call V9_FILA_CAMBIOS
 V9_FILA_OBJETO:
 	ld a,(ix-003h)
 	or a
@@ -337,6 +348,190 @@ V9_FILA_OBJETO:
 	or 080h			; sus patrones llegan en el paso que viene (V9_OBJETO)
 	ld (V9_OBJ),a
 	ret
+
+; V9_FILA_INI: desde el principio de PINTA_FILA_PISTA (0x564C, por
+; V9R_H_FILA_INI). IX es el coche. La foto de la fila que se va a pintar
+; (sus 32 tiles) para V9_FILA_CAMBIOS.
+V9_FILA_INI:
+	ld a,(ix+040h)		; la fila, como en V9_FILA
+	sub 040h
+	rrca
+	rrca
+	rrca
+	and 01Fh
+	ld (V9_VIEJA_FILA),a
+	call V9_HL_FILA
+	ld de,V9_VIEJA
+	ld bc,32
+	ldir
+	ret
+
+; A = fila del buffer (0..31): HL = su principio en E400 (32 bytes seguidos
+; en la misma pagina de 256)
+V9_HL_FILA:
+	rrca
+	rrca
+	rrca
+	ld l,a
+	and 003h
+	add a,E_BUFFER_J1 / 256
+	ld h,a
+	ld a,l
+	and 0E0h
+	ld l,a
+	ret
+
+; C = la fila que el juego acaba de pintar (se respeta). El juego pinta la
+; fila de mas abajo, la que asoma por debajo de la ventana: se queda sucia y
+; se rehace cuando deja de verse (V9_PREP_FILA), como siempre. Pero si hay
+; foto suya de antes (V9_FILA_INI), se apunta en un hueco que columnas de
+; V9_VIS tienen el mismo tile (V9_DIF); entonces V9_PREP_FILA solo rehace las
+; que han cambiado: de las 17 suelen cambiar entre 4 y 8, y muchas veces
+; ninguna. Si la fila ya tenia hueco (pintada otra vez antes de rehacerse),
+; se juntan las dos. Sin foto o sin hueco libre, la fila entera.
+V9_FILA_CAMBIOS:
+	push bc
+	ld hl,V9_VIEJA_FILA
+	ld a,(hl)
+	ld (hl),0FFh		; la foto se gasta aqui
+	cp c
+	jp nz,V9_FCB_SIN_FOTO
+	; V9_DIF: un bit por columna, a 1 si su tile es el de la foto
+	ld a,c
+	call V9_HL_FILA
+	ld de,V9_VIEJA		; (32 bytes en la misma pagina: basta `inc e`)
+	push ix
+	ld ix,V9_DIF
+	ld c,4
+V9_FCB_BYTE:
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld a,(de)
+	inc e
+	sub (hl)
+	inc l
+	cp 1			; acarreo: el mismo tile
+	rr b
+	ld (ix+0),b
+	inc ix
+	dec c
+	jp nz,V9_FCB_BYTE
+	pop ix
+	pop bc
+	push bc			; C = la fila
+	ld a,c
+	call V9_HUECO_BUSCA
+	jr z,V9_FCB_JUNTA	; ya tenia hueco
+	ld a,0FFh
+	call V9_HUECO_BUSCA
+	jr nz,V9_FCB_SUCIA	; no queda ninguno: la fila entera
+	ld (hl),c
+	push hl
+	inc hl
+	ld a,0FFh
+	ld (hl),a
+	inc hl
+	ld (hl),a
+	inc hl
+	ld (hl),a
+	inc hl
+	ld (hl),a
+	pop hl
+V9_FCB_JUNTA:
+	; hueco &= V9_DIF & V9_VIS (uno nuevo empieza con todo a 1)
+	inc hl
+	ex de,hl		; DE = sus 4 bytes
+	ld hl,V9_DIF
+	ld bc,V9_VIS
+	ld a,4
+V9_FCB_Y:
+	push af
+	ld a,(bc)
+	and (hl)
+	ex de,hl
+	and (hl)
+	ld (hl),a
+	ex de,hl
+	inc hl
+	inc de
+	inc bc
+	pop af
+	dec a
+	jr nz,V9_FCB_Y
+	jr V9_FCB_SUCIA
+V9_FCB_SIN_FOTO:
+	ld a,c
+	call V9_HUECO_LIBERA	; sin foto: la fila entera
+V9_FCB_SUCIA:
+	pop bc
+	push bc
+	ld a,c
+	call V9_MARCA_SUCIA
+	pop bc
+	ret
+
+; A = fila: Z y HL = su hueco si lo tiene (0xFF: uno libre), NZ si no
+V9_HUECO_BUSCA:
+	ld hl,V9_HUECOS
+	cp (hl)
+	ret z
+	ld hl,V9_HUECOS+5
+	cp (hl)
+	ret
+
+; A = fila: su hueco, si tiene, libre (se rehara entera)
+V9_HUECO_LIBERA:
+	call V9_HUECO_BUSCA
+	ret nz
+	ld (hl),0FFh
+	ret
+
+; A = fila: sucia, y entera (V9_OBJETO: sus patrones han cambiado, no el tile)
+V9_SUCIA_ENTERA:
+	push af
+	call V9_HUECO_LIBERA
+	pop af
+	jp V9_MARCA_SUCIA
 
 ; V9_OBJETO: desde TILES_OBJETO_PISTA (0x4701, por V9R_H_OBJETO) con un
 ; objeto apuntado en V9_OBJ. Ya estan sus patrones: sus dos filas, sucias.
@@ -347,10 +542,11 @@ V9_OBJETO:
 	ld a,(V9_OBJ)
 	and 01Fh
 	ld (V9_OBJ),a		; (bit 7 fuera: atendido)
-	call V9_MARCA_SUCIA
+	call V9_SUCIA_ENTERA
 	ld a,(V9_OBJ)
 	inc a
 	and 01Fh
+	jp V9_SUCIA_ENTERA
 
 ; A = fila del buffer (0..31): su bit en V9_SUCIAS
 V9_MARCA_SUCIA:
@@ -417,7 +613,18 @@ V9_DET_CMD:
 	call V9_AUTOTEST	; copian bien los comandos? y con cual?
 	ld (V9_COPIA),a
 	or a
+	jr z,V9_DET_FALLO
+	ld a,(V9_CAPS)		; con el V9968 (no con un V9958 de vista previa):
+	cp 003h
 	ret nz
+	ld a,V9968_S16		; con S16, los sprites al derecho (V9R_H_SPRITES)
+	ld (V9_S16),a
+	if V9968_PALETA
+	jp V9_PALETA		; y los colores del MSX1
+	else
+	ret
+	endif
+V9_DET_FALLO:
 	; no: sin modo fino, y el VDP como estaba
 	ld hl,V9_CAPS
 	ld a,(hl)
@@ -435,6 +642,54 @@ V9_DET_CMD:
 	ld a,080h
 	out (VDP_PUERTO4),a	; ...y otra vez puesto
 	ret
+
+	if V9968_PALETA
+; --------------------------------------------------------------------------
+; V9_PALETA: los 16 colores del TMS9918 (el VDP del MSX1, para el que se hizo
+; el juego) con 5 bits por canal. La BIOS del MSX2+ los deja con 3 bits, y
+; los verdes, azules y rojos salen distintos. Se escriben con la paleta
+; extendida del V9968 (R#20 EPAL = 1: por el puerto 2, R, G y B de 5 bits, y
+; R#16 va de 0 a 255) y luego se quita EPAL: en G2 solo cambia el formato de
+; escritura, el VDP sigue pintando con los 5 bits, y si alguien escribiera la
+; paleta a la manera del V9938 (el juego no lo hace nunca) no se liaria.
+; --------------------------------------------------------------------------
+V9_PALETA:
+	xor a
+	out (VDP_PUERTO4),a	; el candado, quitado
+	ld bc,256 * (011h + V9968_S16 * 080h) + 080h + 20	; R#20: HS y EPAL [+ S16]
+	call V9R_REG
+	ld bc,256 * 000h + 080h + 16	; R#16 = 0: desde el color 0 (con EPAL
+	call V9R_REG			; ya puesto, que coja los 8 bits)
+	ld hl,V9_T_PALETA
+	ld bc,256 * 48 + VDP_PALETA	; 16 colores x R, G, B
+	otir
+	ld bc,256 * (001h + V9968_S16 * 080h) + 080h + 20	; R#20: EPAL fuera
+	call V9R_REG
+	ld a,080h
+	out (VDP_PUERTO4),a	; y el candado otra vez puesto
+	ret
+
+; R, G y B de 8 bits de la paleta del TMS9918 de MAME (R. Nabet, de los
+; voltajes de la hoja de datos de TI, con 0.47 V como cero de R-Y y B-Y: los
+; grises salen grises), pasados a 5 bits redondeando
+V9_T_PALETA:
+	db 0, 0, 0			; 0 transparente (el negro)
+	db 0, 0, 0			; 1 negro
+	db (33*31+127)/255, (200*31+127)/255, (66*31+127)/255	; 2 verde
+	db (94*31+127)/255, (220*31+127)/255, (120*31+127)/255	; 3 verde claro
+	db (84*31+127)/255, (85*31+127)/255, (237*31+127)/255	; 4 azul oscuro
+	db (125*31+127)/255, (118*31+127)/255, (252*31+127)/255	; 5 azul claro
+	db (212*31+127)/255, (82*31+127)/255, (77*31+127)/255	; 6 rojo oscuro
+	db (66*31+127)/255, (235*31+127)/255, (245*31+127)/255	; 7 cian
+	db (252*31+127)/255, (85*31+127)/255, (84*31+127)/255	; 8 rojo
+	db (255*31+127)/255, (121*31+127)/255, (120*31+127)/255	; 9 rojo claro
+	db (212*31+127)/255, (193*31+127)/255, (84*31+127)/255	; 10 amarillo oscuro
+	db (230*31+127)/255, (206*31+127)/255, (128*31+127)/255	; 11 amarillo claro
+	db (33*31+127)/255, (176*31+127)/255, (59*31+127)/255	; 12 verde oscuro
+	db (201*31+127)/255, (91*31+127)/255, (186*31+127)/255	; 13 magenta
+	db (204*31+127)/255, (204*31+127)/255, (204*31+127)/255	; 14 gris
+	db 31, 31, 31			; 15 blanco
+	endif
 
 ; --------------------------------------------------------------------------
 ; V9_AUTOTEST: copian bien los comandos del VDP en G2 con CMD = 1? En el
@@ -720,6 +975,9 @@ V9_PREP_BORRA:
 	ld (hl),a
 	inc hl
 	ld (hl),a
+	dec a
+	ld (V9_HUECOS),a	; (y ningun hueco: no queda nada que salvar)
+	ld (V9_HUECOS+5),a
 	call V9_VACIA_LLENAS
 V9_PREP_CAMARA:
 	ld a,(E_CAMARA_Y)
@@ -806,12 +1064,53 @@ V9_PREP_FILA:
 	ld a,d
 	and (hl)
 	ld (hl),a		; ...ni llena...
+	push hl
+	push bc			; (B = su bit en V9_LLENAS, C = la fila)
 	ld a,c
 	add a,a
 	add a,a
 	add a,V9_VALIDAS & 0FFh
-	ld l,a
-	ld h,V9_VALIDAS / 256
+	ld e,a
+	ld d,V9_VALIDAS / 256	; DE = sus bits en V9_VALIDAS
+	ld a,c
+	call V9_HUECO_BUSCA
+	jr nz,V9_PF_TODA
+	ld (hl),0FFh		; con hueco (V9_FILA_CAMBIOS), el hueco se gasta y
+	inc hl			; solo dejan de valer las que han cambiado
+	ld b,4
+	push de
+V9_PF_Y:
+	ld a,(de)
+	and (hl)
+	ld (de),a
+	inc hl
+	inc de
+	djnz V9_PF_Y
+	pop de
+	ld hl,V9_VIS		; si no le falta ninguna de V9_VIS, sigue llena
+	ld b,4
+V9_PF_VIS:
+	ld a,(de)
+	cpl
+	and (hl)
+	jr nz,V9_PF_FALTA
+	inc hl
+	inc de
+	djnz V9_PF_VIS
+	pop bc
+	pop hl
+	ld a,b
+	or (hl)
+	ld (hl),a
+	ret
+V9_PF_FALTA:
+	pop bc
+	pop hl
+	ret
+V9_PF_TODA:
+	pop bc
+	pop hl
+	ex de,hl
 	xor a			; ...ni le vale ninguna celda
 	ld (hl),a
 	inc l
@@ -859,17 +1158,15 @@ V9_BIT_SUCIA:
 ; V9_COLUMNAS: A = columna del mapa de la izquierda de la ventana (0..31),
 ; HL = V9_COL0 con la de antes. V9_VIS son las 15 columnas que se ven y una
 ; mas a cada lado, de margen: cuando la ventana se mueve una columna, la que
-; entra ya esta en la VRAM y solo falta la de margen que llega, que V9_CELDAS
-; rellena entera y de una vez (V9_COL_NUEVA). Si se mueve mas, todo a mirar.
+; entra ya esta en la VRAM y solo falta la de margen que llega
+; (V9_COL_NUEVA), que V9_CELDAS_FONDO rellena a trozos. Mientras tanto, una
+; fila de V9_LLENAS tiene todas las columnas de V9_VIS menos, quiza, esa. Si
+; la ventana se mueve mas de una columna, todo a mirar.
 ; --------------------------------------------------------------------------
 V9_COLUMNAS:
 	ld b,(hl)
 	ld (hl),a
 	ld c,a			; C = la nueva
-	ld a,(V9_COL_NUEVA)	; si la de margen de la vez anterior esta sin
-	inc a			; rellenar (no hubo repintado fino), V9_LLENAS
-	jr nz,V9_COLS_TODAS	; ya no dice la verdad
-	ld a,c
 	sub b
 	and 01Fh
 	dec a
@@ -890,6 +1187,9 @@ V9_COLS_IZQ:
 	dec a
 V9_COLS_MARGEN:
 	and 01Fh
+	push af
+	call V9_COLS_PENDIENTE
+	pop af
 V9_COLS_NUEVA:
 	ld (V9_COL_NUEVA),a
 	ld hl,V9_VIS
@@ -931,6 +1231,32 @@ V9_COLS_BUCLE:
 	djnz V9_COLS_BUCLE
 	ret
 
+; C = la columna de la izquierda de la ventana nueva. Si la de margen de la
+; vez anterior aun esta a medias y sigue en V9_VIS (la ventana ha seguido
+; hacia ese lado: ahora se ve), se acaba ya, columna abajo (V9_COLUMNA): asi
+; cuesta sus celdas y poco mas. Sacando sus filas de V9_LLENAS, V9_RECORRE
+; las rehacia de una en una, y cada fila tiene un coste fijo grande: hasta
+; 15 ms para 20 celdas. Si se ha quedado fuera, ya no hace falta.
+V9_COLS_PENDIENTE:
+	ld a,(V9_COL_NUEVA)
+	cp 0FFh
+	ret z
+	ld e,a			; E = la de margen de antes
+	sub c
+	inc a
+	and 01Fh
+	cp 17			; V9_VIS: de C - 1 a C + 15
+	ret nc
+	push bc
+	push de
+	call V9_CEL_REGISTROS
+	pop bc			; (C = la de antes)
+	ld a,0FFh
+	ld (V9_PRESUP),a	; entera
+	call V9_COLUMNA
+	pop bc
+	ret
+
 ; --------------------------------------------------------------------------
 ; V9_CELDAS: rellena en el mapa de la VRAM las celdas que faltan. La columna
 ; de margen que haya llegado, entera; luego lo visible y, con lo que quede,
@@ -954,26 +1280,36 @@ V9_CEL_PRESUP:
 	ld (V9_REGS_CELDA),a
 	jp V9_RECORRE		; las filas que se ven
 
-; V9_CELDAS_FONDO: con lo visible ya en pantalla, lo que no se ve: la
-; columna de margen que haya llegado, entera, y las filas ocultas mientras
-; quede presupuesto. Desde 0x405A (V9R_REPINTA_405A), despues del sonido.
+; V9_CELDAS_FONDO: con lo visible ya en pantalla, lo que no se ve, N_ADELANTO
+; celdas como mucho: la columna de margen que haya llegado (N_MARGEN por vez:
+; entera eran hasta 32 celdas y unos 20 ms de golpe al cruzar una columna, y
+; con eso algun paso llegaba tarde) y, con lo que quede, las filas ocultas.
+; Desde 0x405A (V9R_REPINTA_405A), despues del sonido.
 V9_CELDAS_FONDO:
 	xor a
 	ld (V9_REGS_CELDA),a
+	ld a,N_ADELANTO
+	ld (V9_PRESUP),a
 	ld a,(V9_COL_NUEVA)
-	inc a
+	cp 0FFh
 	jr z,V9_FONDO_FILAS
-	call V9_CEL_REGISTROS
-	ld a,(V9_COL_NUEVA)
 	ld c,a
-	ld a,0FFh
-	ld (V9_COL_NUEVA),a
+	push bc
+	call V9_CEL_REGISTROS
+	pop bc
+	ld a,N_MARGEN
+	ld (V9_PRESUP),a
 	call V9_COLUMNA
+	jr nz,V9_FONDO_RESTO	; a medias: sigue en V9_COL_NUEVA
+	ld a,0FFh
+	ld (V9_COL_NUEVA),a	; entera
+V9_FONDO_RESTO:
+	ld a,(V9_PRESUP)	; lo que no ha gastado la columna, para las filas
+	add a,N_ADELANTO - N_MARGEN
+	ld (V9_PRESUP),a
 V9_FONDO_FILAS:
 	call V9_TODAS_LLENAS
 	ret z
-	ld a,N_ADELANTO
-	ld (V9_PRESUP),a
 	ld a,1
 	jp V9_RECORRE
 
@@ -1004,9 +1340,11 @@ V9_CEL_REGISTROS:
 
 ; --------------------------------------------------------------------------
 ; V9_COLUMNA: C = columna del mapa: la columna de margen que acaba de
-; llegar, en todas las filas en que falte y de una vez (con el presupuesto
-; por filas costaria una fila entera por celda). Las que se ven y el juego
-; ya ha repintado (ver V9_PREPARA) se dejan: pierden V9_LLENAS y las atiende
+; llegar, en las filas en que falte (de arriba abajo de la ventana, las que
+; se ven primero) mientras quede V9_PRESUP. Sale con Z si ya no le falta
+; nada y NZ si se ha acabado el presupuesto; la vez siguiente sigue donde se
+; quedo (las celdas que ya estan se saltan). Las que se ven y el juego ya ha
+; repintado (ver V9_PREPARA) se dejan: pierden V9_LLENAS y las atiende
 ; V9_FILA_CELDAS como cualquier otra.
 ; --------------------------------------------------------------------------
 V9_COLUMNA:
@@ -1074,6 +1412,11 @@ V9_COL_LIMPIA:
 	pop bc
 	pop hl
 V9_COL_VALE:
+	ld a,(V9_PRESUP)
+	or a
+	jr z,V9_COL_AGOTADO
+	dec a
+	ld (V9_PRESUP),a
 	ld a,(hl)
 	or d
 	ld (hl),a		; valida desde ya
@@ -1131,6 +1474,9 @@ V9_COL_SIGUE:
 	ld a,b
 	cp 32
 	jp nz,V9_COL_FILA
+	ret			; (Z: entera)
+V9_COL_AGOTADO:
+	inc a			; (A = 0 -> NZ: a medias)
 	ret
 
 ; Las filas del mapa de la pasada A (0 = las que se ven, 1 = las ocultas) que
@@ -1323,7 +1669,7 @@ V9_FC_BYTE:
 	jr z,V9_FC_VACIO
 	ld d,001h		; D = el bit de la columna C
 V9_FC_BIT:
-	rrca
+	srl a			; (entran ceros: Z cuando no quedan)
 	jr nc,V9_FC_NO
 	ex af,af'
 	ld a,(V9_PRESUP)
@@ -1344,9 +1690,15 @@ V9_FC_BIT:
 	call V9_CELDA
 	ex af,af'
 V9_FC_NO:
+	jr z,V9_FC_RESTO	; ya no faltan mas en este byte
 	inc c
 	rlc d
-	jr nc,V9_FC_BIT		; ocho bits
+	jr V9_FC_BIT
+V9_FC_RESTO:
+	ld a,c			; a la primera columna del byte siguiente
+	or 007h
+	inc a
+	ld c,a
 	jr V9_FC_BYTE_SIGUE
 V9_FC_VACIO:
 	ld a,c
@@ -1396,12 +1748,11 @@ V9_CEL_ESPERA1:
 	rrca
 	jr c,V9_CEL_ESPERA1
 	ld a,e
-	and 01Fh
 	add a,a
 	add a,a
 	add a,a
 	out (VDP_CTRL),a
-	ld a,080h + 32		; SX = (tile & 31) * 8
+	ld a,080h + 32		; SX = (tile & 31) * 8 (los bits de arriba se caen)
 	out (VDP_CTRL),a
 	ld a,e
 	rlca

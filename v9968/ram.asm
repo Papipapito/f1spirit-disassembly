@@ -246,6 +246,30 @@ V9R_H_FILA:
 	pop hl
 	jp MAPEA_1_2_3
 
+; 0x564C, lo primero de PINTA_FILA_PISTA (`call MAPEA_7_8_9`, con `call`): el
+; juego va a pintar una fila del buffer. V9_FILA_INI (pagina 16) le hace una
+; foto, y al acabar V9_FILA solo rehace las celdas que cambien. Las mismas
+; condiciones que V9R_H_FILA.
+V9R_H_FILA_INI:
+	ld a,(V9_CAPS)
+	or a
+	jp z,MAPEA_7_8_9
+	ld a,(ix+009h)
+	dec a
+	jp nz,MAPEA_7_8_9
+	ld a,(V9_TILES+1)
+	or a
+	jp nz,MAPEA_7_8_9
+	push hl
+	push de
+	push bc
+	ld hl,P16_FILA_INI
+	call V9R_LEJOS
+	pop bc
+	pop de
+	pop hl
+	jp MAPEA_7_8_9
+
 ; 0x4701 TILES_OBJETO_PISTA: el juego carga ahora los patrones del objeto que
 ; puso en la pista en el paso anterior (tiles 206/207 del jugador 1). Las
 ; filas donde esta ya se rellenaron con los de antes: a rehacer (pagina 16).
@@ -258,6 +282,19 @@ V9R_H_OBJETO:
 	ld hl,P16_OBJETO
 	call m,V9R_LEJOS
 	pop af
+	ret
+
+; 0x4784 SPRITES_A_VRAM, en lugar de `ld a,(0E1C3h)`: con el bit 0 a 1 los
+; sprites van a la VRAM al reves, para repartir el limite de 4 por linea del
+; MSX1 entre los pasos pares y los impares. Con S16 caben 16 por linea: van
+; siempre al derecho, y dos coches que se tocan dejan de turnarse cual va
+; encima. Con `call`; devuelve A.
+V9R_H_SPRITES:
+	ld a,(V9_S16)
+	or a
+	ld a,(0E1C3h)
+	ret z
+	xor a			; bit 0 a 0: al derecho
 	ret
 
 V9R_FIN:

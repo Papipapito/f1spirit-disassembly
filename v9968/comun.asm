@@ -12,6 +12,7 @@
 ; --------------------------------------------------------------------------
 REPINTA_PENDIENTE	equ 040BBh	; sprites, ventana de la pista y rotulos
 MAPEA_1_2_3		equ 043FEh	; 1/2/3 en 6000/8000/A000, respeta HL y acaba en `ei`
+MAPEA_7_8_9		equ 04438h	; 7/8/9 en 6000/8000/A000 (lo primero de PINTA_FILA_PISTA)
 VENTANA_1J_SIGUE	equ 04517h	; lo que sigue al `ld ix,0E2C0h` de 0x4513
 VACIA_COLA_SONIDO	equ 04140h	; las ordenes de sonido pendientes (p13 0x6000)
 CUENTA_ATRAS_F0F7	equ 04155h	; la cuenta atras de tiempo real, una por interrupcion
@@ -40,7 +41,9 @@ G_CORTINILLA		equ 049C7h	; ld hl,0E1C4h
 G_CASILLA_HUD		equ 0491Bh	; ld hl,03965h
 G_LISTA_TILES		equ 04CD1h	; push hl / pop ix (CARGA_LISTA_TILES_MODO)
 G_FILA_PISTA_FIN	equ 056D4h	; jp MAPEA_1_2_3
+G_FILA_PISTA_INI	equ 0564Ch	; call MAPEA_7_8_9 (lo primero de PINTA_FILA_PISTA)
 G_OBJETO		equ 04701h	; ld (ix-003h),000h (4 bytes; TILES_OBJETO_PISTA)
+G_SPRITES		equ 04784h	; ld a,(0E1C3h) (SPRITES_A_VRAM: al derecho o al reves)
 
 ; --------------------------------------------------------------------------
 ; El juego: variables
@@ -61,6 +64,7 @@ E_BUFFER_J1		equ 0E400h	; el mapa circular de 32 x 32 del jugador 1
 VDP_DATOS		equ 098h
 VDP_CTRL		equ 099h
 VDP_IND			equ 09Bh
+VDP_PALETA		equ 09Ah
 VDP_PUERTO4		equ 09Ch
 
 HMMM			equ 0D0h
@@ -112,6 +116,7 @@ P16_DETECTA		equ 06006h	; jp V9_DETECTA
 P16_FILA		equ 06009h	; jp V9_FILA
 P16_OBJETO		equ 0600Ch	; jp V9_OBJETO
 P16_FONDO		equ 0600Fh	; jp V9_CELDAS_FONDO
+P16_FILA_INI		equ 06012h	; jp V9_FILA_INI
 
 ; --------------------------------------------------------------------------
 ; La RAM del parche: 0xF100-0xF37F, hasta la zona de la BIOS (0xF380). INIT
@@ -141,6 +146,10 @@ V9_LLENAS		equ 0F298h	; (4) filas del mapa con todas las columnas de V9_VIS
 V9_FALTA		equ 0F29Ch	; (4) las columnas que le faltan a la fila que se rellena
 V9_PVAL			equ 0F2A0h	; (2) sus bits en V9_VALIDAS
 V9_COL_NUEVA		equ 0F2A2h	; la columna de margen que ha entrado (0xFF: ninguna)
+V9_VIEJA_FILA		equ 0F2A3h	; la fila de la foto de V9_VIEJA (0xFF: ninguna)
+V9_DIF			equ 0F2A4h	; (4) sus columnas con el mismo tile que antes
+V9_HUECOS		equ 0F2A8h	; (10) 2 x (fila o 0xFF, 4 bytes de V9_DIF): lo que
+				; no cambio en una fila pintada que aun se ve
 V9_FILA_RAM		equ 0F2B6h	; (2) la fila del buffer E400 que se rellena
 V9_SX			equ 0F2B8h	; linea del mapa de arriba del tercio
 V9_DYT			equ 0F2B9h	; 8 * tercio + 1
@@ -160,19 +169,27 @@ V9_HECHO		equ 0F2DCh	; 1: repintado antes del sonido; 2: y en fino (falta el fon
 V9_REGS_CELDA		equ 0F2DDh	; 1: los registros fijos de celda ya estan en el VDP
 V9_TIR_PEND		equ 0F2DEh	; 1: faltan las tiras de los tercios 1 y 2
 V9_TIR_HASTA		equ 0F2DFh	; el tercio en el que para V9_TIR_TERCIOS
-V9_ANTICIPO		equ 0F2E0h	; 1: V9_ANTES ya ha hecho lo suyo (2: y sale gruesa)
-V9_PEND			equ 0F2E1h	; interrupciones recuperadas que aun no han sonado
-V9_EN_TIC		equ 0F2E2h	; 1: V9_TICS_PENDIENTES en marcha (no se reentra)
-V9_COPIA		equ 0F2E3h	; el comando de las copias: HMMM, o LMMM si HMMM salta bytes
+V9_ANTICIPO		equ 0F2CFh	; 1: V9_ANTES ya ha hecho lo suyo (2: y sale gruesa)
+V9_PEND			equ 0F2D0h	; interrupciones recuperadas que aun no han sonado
+V9_EN_TIC		equ 0F2D1h	; 1: V9_TICS_PENDIENTES en marcha (no se reentra)
+V9_COPIA		equ 0F2D2h	; el comando de las copias: HMMM, o LMMM si HMMM salta bytes
+V9_S16			equ 0F2D3h	; 1: S16 puesto, los sprites siempre al derecho
 V9_BLK			equ 0F2C0h	; (15) registros R#32..R#46 para `otir`
+V9_VIEJA		equ 0F2E0h	; (32) la fila del buffer antes de que el juego la pinte
 V9_VALIDAS		equ 0F300h	; (128) 32 filas x 32 bits: celdas del mapa al dia
 
 N_ENTRADA		equ 40		; celdas por repintado mientras se entra
-N_ADELANTO		equ 20		; celdas por repintado para las filas ocultas
+N_ADELANTO		equ 20		; celdas por repintado de fondo (margen + ocultas)
+N_MARGEN		equ 12		; de esas, como mucho, para la columna de margen
 
 ; Opcion: 16 sprites por linea en el V9968 (R#20 S16). Con 1 desaparece el
 ; parpadeo de sprites de mas de cuatro en una linea.
 V9968_S16		equ 1
+
+; Opcion: los colores del MSX1 (TMS9918) con la paleta de 15 bits del V9968.
+; El juego es de MSX1 y no toca la paleta: en un MSX2+ sale con la de la
+; BIOS, de 9 bits. Con 0, la de la BIOS.
+V9968_PALETA		equ 1
 
 ; Opcion: modo fino tambien con un V9958 (MSX2+, turboR). Funciona, pero sin
 ; los comandos rapidos del V9968 la carrera va a unos 12 pasos por segundo en
