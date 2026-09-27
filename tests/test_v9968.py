@@ -232,6 +232,19 @@ class TestV9968Rom(unittest.TestCase):
         self.assertIn(ram, p15)
         self.assertLessEqual(parche.RAM_INICIO + len(ram), parche.RAM_FIN)
 
+    def test_las_copias_usan_el_comando_del_autotest(self):
+        # en el V9968 de HRA! HMMM salta bytes en G2: cada comando de copia del
+        # renderer sale de V9_COPIA (HMMM o LMMM, lo que diga el autotest), ni
+        # uno con HMMM fijo (`ld a,0D0h / out (099h),a`)
+        p16 = self.nueva[16 * TAM_PAGINA:17 * TAM_PAGINA]
+        copia = self.sim["V9_COPIA"]
+        self.assertNotIn(b"\x3e\xd0\xd3\x99", p16)
+        self.assertGreaterEqual(p16.count(bytes([0x3A, copia & 0xFF, copia >> 8, 0xD3, 0x99])), 3)
+        # y las plantillas de 15 registros (R#32..R#46) no traen comando: la
+        # del autotest, 4 x 1 de (0, 496) a (0, 497)
+        self.assertIn(bytes([0, 0, 0xF0, 1, 0, 0, 0xF1, 1, 4, 0, 1, 0, 0, 0, 0]), p16)
+        self.assertEqual(self.sim["LMMM"], 0x90)
+
     def test_relleno(self):
         # las paginas 17-31 a 0xFF: el mapper las puede ver, pero nadie las usa
         self.assertEqual(set(self.nueva[17 * TAM_PAGINA:]), {0xFF})

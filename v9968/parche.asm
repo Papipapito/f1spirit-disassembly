@@ -20,7 +20,9 @@
 ; scroll fino es copiar con HMMM desde la linea que diga la camara: 18
 ; comandos por repintado (3 tercios x 3 grupos de 5 columnas x patron y
 ; color). El mapa se rellena tile a tile (dos HMMM de 8 x 1 por celda) solo
-; cuando el juego pinta filas nuevas.
+; cuando el juego pinta filas nuevas. Donde HMMM salta bytes en G2 (el V9968
+; de HRA!), las copias van con LMMM: lo decide al arrancar V9_AUTOTEST, y el
+; comando queda en V9_COPIA.
 ;
 ; Las tablas del juego (0x0000 y 0x2000) no se tocan nunca: son el atlas del
 ; que se copian los tiles. En modo fino el VDP pinta con tablas propias en
@@ -411,7 +413,144 @@ V9_DET_V9968:
 	out (VDP_PUERTO4),a	; y el candado otra vez puesto
 V9_DET_CMD:
 	ld bc,256 * 040h + 080h + 25	; R#25: CMD = 1
-	jp V9R_REG
+	call V9R_REG
+	call V9_AUTOTEST	; copian bien los comandos? y con cual?
+	ld (V9_COPIA),a
+	or a
+	ret nz
+	; no: sin modo fino, y el VDP como estaba
+	ld hl,V9_CAPS
+	ld a,(hl)
+	ld (hl),0
+	push af
+	ld bc,256 * 000h + 080h + 25	; R#25 = 0
+	call V9R_REG			; (se lleva A)
+	pop af
+	cp 003h
+	ret nz
+	xor a
+	out (VDP_PUERTO4),a
+	ld bc,256 * 000h + 080h + 20	; R#20 = 0, con el candado quitado...
+	call V9R_REG
+	ld a,080h
+	out (VDP_PUERTO4),a	; ...y otra vez puesto
+	ret
+
+; --------------------------------------------------------------------------
+; V9_AUTOTEST: copian bien los comandos del VDP en G2 con CMD = 1? En el
+; V9968 de HRA! (su RTL, al menos hasta septiembre de 2026) no del todo:
+; fuera de los modos de mapa de bits, HMMM (y HMMV, YMMM y HMMC) avanza dos
+; bytes por paso, como en SCREEN 5 o 7, y copia un byte si y otro no. LMMM va
+; de byte en byte y ahi copia bien. Se prueba con 4 bytes de 0x1F000 a
+; 0x1F100 (VRAM que no usa nadie) en G2: los registros de modo se cambian un
+; momento, con la pantalla apagada. Y de paso, que la VRAM tenga 128 KB:
+; 0x0F100 no puede cambiar. Sale con A = el comando que copia bien (HMMM o
+; LMMM) o 0 si ninguno. Sin interrupciones.
+; --------------------------------------------------------------------------
+V9_AUTOTEST:
+	ld a,(RG0SAV)
+	and 0F1h
+	or 002h			; G2: M3 = 1, M4 = M5 = 0
+	ld b,a
+	ld c,080h + 0
+	call V9R_REG
+	ld a,(RG1SAV)
+	and 0A7h		; M1 = M2 = 0, y BL = 0: la pantalla apagada
+	ld b,a
+	ld c,080h + 1
+	call V9R_REG
+	ld a,HMMM
+	call V9_AT_PRUEBA
+	ld a,HMMM
+	jr z,V9_AT_FIN
+	ld a,LMMM
+	call V9_AT_PRUEBA
+	ld a,LMMM
+	jr z,V9_AT_FIN
+	xor a
+V9_AT_FIN:
+	push af
+	ld a,(RG0SAV)		; los registros de modo como estaban
+	ld b,a
+	ld c,080h + 0
+	call V9R_REG
+	ld a,(RG1SAV)
+	ld b,a
+	ld c,080h + 1
+	call V9R_REG
+	ld bc,256 * 000h + 080h + 14	; R#14 = 0: el juego escribe
+	call V9R_REG			; direcciones de 14 bits
+	pop af
+	ret
+
+; A = el comando. Z si ha copiado los 4 bytes y la VRAM tiene 128 KB.
+V9_AT_PRUEBA:
+	push af
+	ld hl,V9_T_PRUEBA
+	call V9_BLK_CARGA
+	pop af
+	ld (V9_BLK+14),a
+	ld hl,07000h		; 0x1F000 (escribir): 11 22 33 44
+	call V9_AT_DIR
+	ld a,011h
+V9_AT_ORIGEN:
+	out (VDP_DATOS),a
+	add a,011h
+	cp 055h
+	jr nz,V9_AT_ORIGEN
+	ld hl,07100h		; 0x1F100: 00 00 00 00
+	call V9_AT_DIR
+	xor a
+	ld b,4
+V9_AT_DESTINO:
+	out (VDP_DATOS),a
+	djnz V9_AT_DESTINO
+	ld a,3			; 0x0F100 = 0xA5 (con 64 KB, seria el primer byte
+	ld hl,07100h		; del destino)
+	call V9_AT_DIR_A
+	ld a,0A5h
+	out (VDP_DATOS),a
+	ld a,32
+	out (VDP_CTRL),a
+	ld a,080h + 17		; R#17 = 32, con autoincremento
+	out (VDP_CTRL),a
+	ld hl,V9_BLK
+	ld bc,256 * 15 + VDP_IND
+	otir
+	call V9_ESPERA
+	ld hl,03100h		; 0x1F100 (leer)
+	call V9_AT_DIR
+	ld hl,V9_AT_BIEN
+	ld b,4
+V9_AT_LEE:
+	in a,(VDP_DATOS)
+	cp (hl)
+	ret nz
+	inc hl
+	djnz V9_AT_LEE
+	ld a,3
+	ld hl,03100h		; 0x0F100 (leer): sigue siendo 0xA5?
+	call V9_AT_DIR_A
+	in a,(VDP_DATOS)
+	cp 0A5h
+	ret
+
+; HL = direccion de 14 bits (+ 0x4000 para escribir), con R#14 = 7
+; (V9_AT_DIR) o A (V9_AT_DIR_A)
+V9_AT_DIR:
+	ld a,7
+V9_AT_DIR_A:
+	out (VDP_CTRL),a
+	ld a,080h + 14
+	out (VDP_CTRL),a
+	ld a,l
+	out (VDP_CTRL),a
+	ld a,h
+	out (VDP_CTRL),a
+	ret
+
+V9_AT_BIEN:
+	db 011h,022h,033h,044h
 
 ; A = el ID del VDP (S#1, bits 5..1)
 V9_ID:
@@ -1284,7 +1423,7 @@ V9_CEL_ESPERA1:
 	out (VDP_CTRL),a
 	ld a,080h + 42		; NY
 	out (VDP_CTRL),a
-	ld a,HMMM
+	ld a,(V9_COPIA)
 	out (VDP_CTRL),a
 	ld a,080h + 46
 	out (VDP_CTRL),a
@@ -1306,7 +1445,7 @@ V9_CEL_ESPERA2:
 	out (VDP_CTRL),a
 	ld a,080h + 42
 	out (VDP_CTRL),a
-	ld a,HMMM
+	ld a,(V9_COPIA)
 	out (VDP_CTRL),a
 	ld a,080h + 46
 	out (VDP_CTRL),a
@@ -1406,6 +1545,8 @@ V9_TIR_COPIA:
 	ld (V9_ESPEJO),a
 	ld hl,V9_T_ESPEJO
 	call V9_BLK_CARGA
+	ld a,(V9_COPIA)
+	ld (V9_BLK+14),a
 	ld hl,V9_TABLA_ESPEJO
 	ld b,8
 V9_TIR_ESPEJO:
@@ -1604,7 +1745,7 @@ V9_HT_ESPERA:
 	out (VDP_CTRL),a
 	ld a,080h + 42		; NY
 	out (VDP_CTRL),a
-	ld a,HMMM
+	ld a,(V9_COPIA)
 	out (VDP_CTRL),a
 	ld a,080h + 46
 	out (VDP_CTRL),a
@@ -1693,8 +1834,10 @@ V9_NOMBRE_BASE:
 ; R#32..R#46: SX, SY, DX, DY, NX, NY, CLR, ARG, CMD
 V9_T_CELDA:	; NX = 8, DY alto = 1; CMD = 0 (solo carga)
 	db 0,0, 0,0, 0,0, 0,1, 8,0, 1,0, 0,0, 0
-V9_T_ESPEJO:	; filas enteras (NX = 256) del juego a las tablas propias
-	db 0,0, 0,0, 0,0, 0,1, 0,1, 1,0, 0,0, HMMM
+V9_T_ESPEJO:	; filas enteras (NX = 256) del juego a las tablas propias; CMD, V9_COPIA
+	db 0,0, 0,0, 0,0, 0,1, 0,1, 1,0, 0,0, 0
+V9_T_PRUEBA:	; el autotest: 4 x 1 de (0, 496) a (0, 497); CMD, el que se prueba
+	db 0,0, 0F0h,1, 0,0, 0F1h,1, 4,0, 1,0, 0,0, 0
 V9_T_TIRA:	; del mapa (SY alto = 1) a las tablas propias (DY alto = 1); CMD = 0
 	db 0,0, 0,1, 0,0, 0,1, 64,0, 5,0, 0,0, 0
 

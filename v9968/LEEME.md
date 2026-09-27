@@ -124,6 +124,18 @@ tiempo: la carrera bajaria a unos 12 pasos por segundo en vez de 20, asi que
 se queda con el scroll de siempre (`V9958_FINO equ 1` en `comun.asm` para
 probarlo igualmente).
 
+**Autotest.** Antes de dar por bueno el VDP se prueba una copia de verdad:
+4 bytes de 0x1F000 a 0x1F100 en G2 con CMD = 1 (los registros de modo se
+cambian un momento, con la pantalla apagada), y que 0x0F100 no cambie (128 KB
+de VRAM). Hace falta porque el V9968 de HRA! (su RTL, al menos hasta
+`cbe1528`, septiembre de 2026, y el MSXimus, que lo lleva) tiene un fallo: fuera
+de los modos de mapa de bits, HMMM, HMMV, YMMM y HMMC avanzan **dos bytes por
+paso** (`w_next` de `vdp_command.v` solo mira si el modo es G7), asi que copian
+un byte si y otro no. LMMM va de byte en byte y ahi copia bien. El autotest
+prueba HMMM y, si salta bytes, LMMM; el comando que vale queda en `V9_COPIA`
+y es el que usan las celdas, las tiras y el HUD. Si no va ninguno, el VDP se
+deja como estaba y el juego va con el scroll de siempre.
+
 ## Donde esta cada cosa
 
 | | |
@@ -159,6 +171,12 @@ Todo en el emulador (el fork de openMSX), con la demo del juego:
   a la meta unos 0,35 s despues que el original.
 - **Estabilidad**: 200 s de demo seguidos sin cuelgues, con la pila en su
   sitio (nunca por debajo de 0xF086). La vista previa con V9958, 140 s.
+- **Autotest**: con el fork tal cual elige HMMM; con el fallo de HRA emulado
+  (`OPENMSX_HRA_G2_QUIRK=1`), LMMM, y la carrera sale igual: 111.765 lineas
+  de tile bien y ninguna mal, y la logica identica paso a paso (1.483 pasos).
+  Con un V9958 (vista previa) elige HMMM; en un MSX2 no llega a probar nada.
+  Si no copia bien ningun comando (forzado desde el depurador), el VDP vuelve
+  a como estaba (R#20, R#25 y R#14 a 0) y la demo va con el scroll de siempre.
 
 ## Limitaciones
 
@@ -176,9 +194,19 @@ Todo en el emulador (el fork de openMSX), con la demo del juego:
 - **Sonido**: en las interrupciones en las que se repinta (una de cada
   tres), el paso del reproductor llega hasta unos 7 ms mas tarde. No se ha
   comprobado de oido.
-- **Solo probado en emulacion.** La velocidad de los comandos con HS es la
-  que emula el fork; en un V9968 de verdad puede ser otra. El candado del
-  puerto 4 (bit 7), que el RTL pide para escribir R#20/R#21, se quita y se
-  vuelve a poner como dice su documentacion, pero el fork no lo emula.
+- **Probado en emulacion y en simulacion del RTL.** El fork emula un V9968
+  que copia bien con HMMM; con la variable `OPENMSX_HRA_G2_QUIRK` (un parche
+  de pruebas al fork) salta bytes como el RTL de HRA!, y el autotest elige
+  LMMM. El motor de comandos del RTL (`vdp_command.v` y su cache) se ha
+  simulado con iverilog: HMMM copia la mitad de los bytes y LMMM todos, en
+  las celdas, las tiras (tambien las partidas, de ancho impar) y el HUD. En
+  esa simulacion (con una VRAM de 7 ciclos de latencia) una tira de 64 x 5 son
+  unos 5.000 ciclos del VDP con LMMM, unos 60 us a 85,9 MHz. Si el RTL se
+  arregla (que `w_next` y `w_nx_max` vayan de byte en byte tambien fuera de
+  G4-G6, no solo en G7), el autotest elige HMMM, que alli va como en G7: unos
+  3.100 ciclos por tira. La velocidad de verdad depende de la VRAM de cada
+  maquina. El candado del puerto 4 (bit 7), que el RTL pide para escribir
+  R#20/R#21, se quita y se vuelve a poner como dice su documentacion, pero el
+  fork no lo emula.
 - **ROM de 256 KB**: hace falta un cartucho flash o un emulador que la
   acepte con el mapper Konami SCC.

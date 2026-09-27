@@ -64,6 +64,11 @@ VDP_IND			equ 09Bh
 VDP_PUERTO4		equ 09Ch
 
 HMMM			equ 0D0h
+LMMM			equ 090h	; con la operacion IMP
+
+; las copias de R#0 y R#1 que guarda la BIOS
+RG0SAV			equ 0F3DFh
+RG1SAV			equ 0F3E0h
 
 ; --------------------------------------------------------------------------
 ; La VRAM. Las tablas del juego (colores en 0x0000, patrones en 0x2000,
@@ -158,6 +163,7 @@ V9_TIR_HASTA		equ 0F2DFh	; el tercio en el que para V9_TIR_TERCIOS
 V9_ANTICIPO		equ 0F2E0h	; 1: V9_ANTES ya ha hecho lo suyo (2: y sale gruesa)
 V9_PEND			equ 0F2E1h	; interrupciones recuperadas que aun no han sonado
 V9_EN_TIC		equ 0F2E2h	; 1: V9_TICS_PENDIENTES en marcha (no se reentra)
+V9_COPIA		equ 0F2E3h	; el comando de las copias: HMMM, o LMMM si HMMM salta bytes
 V9_BLK			equ 0F2C0h	; (15) registros R#32..R#46 para `otir`
 V9_VALIDAS		equ 0F300h	; (128) 32 filas x 32 bits: celdas del mapa al dia
 
